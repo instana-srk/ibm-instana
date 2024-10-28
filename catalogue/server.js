@@ -1,10 +1,14 @@
-const instana = require('@instana/collector');
-// Initialize Instana tracing
-instana({
-    tracing: {
-        enabled: true
-    }
-});
+const instanaAvailable = process.env.INSTANA_AGENT_AVAILABLE === 'true';
+let instana;
+if (instanaAvailable) {
+    instana = require('@instana/collector')({
+        agentHost: process.env.INSTANA_AGENT_HOST || 'localhost',
+        tracing: { enabled: true }
+    });
+    console.log("Instana initialized.");
+} else {
+    console.log("Instana not initialized as agent is unavailable.");
+}
 
 const { MongoClient, ObjectId } = require('mongodb');
 const bodyParser = require('body-parser');
@@ -12,14 +16,8 @@ const express = require('express');
 const pino = require('pino');
 const expPino = require('express-pino-logger');
 
-const logger = pino({
-    level: 'info',
-    prettyPrint: false,
-    useLevelLabels: true
-});
-const expLogger = expPino({
-    logger: logger
-});
+const logger = pino({ level: 'info', prettyPrint: false, useLevelLabels: true });
+const expLogger = expPino({ logger: logger });
 
 // MongoDB
 let db;
@@ -35,19 +33,20 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use((req, res, next) => {
-    let dcs = [
-        "asia-northeast2",
-        "asia-south1",
-        "europe-west3",
-        "us-east1",
-        "us-west1"
-    ];
-    let span = instana.currentSpan();
-    span.annotate('custom.sdk.tags.datacenter', dcs[Math.floor(Math.random() * dcs.length)]);
-
-    next();
-});
+if (instanaAvailable) {
+    app.use((req, res, next) => {
+        let dcs = [
+            "asia-northeast2",
+            "asia-south1",
+            "europe-west3",
+            "us-east1",
+            "us-west1"
+        ];
+        let span = instana.currentSpan();
+        span.annotate('custom.sdk.tags.datacenter', dcs[Math.floor(Math.random() * dcs.length)]);
+        next();
+    });
+}
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -60,7 +59,7 @@ app.get('/health', (req, res) => {
     res.json(stat);
 });
 
-// all products
+// All products
 app.get('/products', (req, res) => {
     if (mongoConnected) {
         collection.find({}).toArray()
@@ -71,7 +70,7 @@ app.get('/products', (req, res) => {
     }
 });
 
-// product by SKU
+// Product by SKU
 app.get('/product/:sku', (req, res) => {
     if (mongoConnected) {
         const delay = process.env.GO_SLOW || 0;
@@ -85,7 +84,7 @@ app.get('/product/:sku', (req, res) => {
     }
 });
 
-// products in a category
+// Products in a category
 app.get('/products/:cat', (req, res) => {
     if (mongoConnected) {
         collection.find({ categories: req.params.cat }).sort({ name: 1 }).toArray()
@@ -96,7 +95,7 @@ app.get('/products/:cat', (req, res) => {
     }
 });
 
-// all categories
+// All categories
 app.get('/categories', (req, res) => {
     if (mongoConnected) {
         collection.distinct('categories')
@@ -107,7 +106,7 @@ app.get('/categories', (req, res) => {
     }
 });
 
-// search name and description
+// Search name and description
 app.get('/search/:text', (req, res) => {
     if (mongoConnected) {
         collection.find({ '$text': { '$search': req.params.text } }).toArray()
@@ -128,7 +127,7 @@ function sendDbError(req, res) {
     res.status(500).send('Database not available');
 }
 
-// set up Mongo
+// Set up Mongo
 async function mongoConnect() {
     try {
         const mongoURL = process.env.MONGO_URL || 'mongodb://mongodb:27017/catalogue';
@@ -144,7 +143,7 @@ async function mongoConnect() {
     }
 }
 
-// mongodb connection retry loop
+// MongoDB connection retry loop
 function mongoLoop() {
     mongoConnect().catch(error => {
         logger.error('ERROR', error);
@@ -154,7 +153,7 @@ function mongoLoop() {
 
 mongoLoop();
 
-// start server
+// Start server
 const port = process.env.CATALOGUE_SERVER_PORT || '8080';
 app.listen(port, () => {
     logger.info('Started on port', port);

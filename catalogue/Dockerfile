@@ -1,3 +1,4 @@
+# Base image
 FROM node:20-alpine
 RUN apk add --no-cache bash
 
@@ -22,6 +23,10 @@ RUN chown -R roboshop:roboshop /opt/server/node_modules && \
 
 # Switch to non-root user
 USER roboshop
+
+
+ENV INSTANA_AGENT_HOST=localhost
+ENV INSTANA_AGENT_AVAILABLE=false  # Set to 'true' when deploying with Instana agent available
 
 # Expose port
 EXPOSE 8080

@@ -53,6 +53,22 @@ app.get('/metrics', (req, res) => {
     res.send(register.metrics());
 });
 
+// Helper function to fetch product details from the catalogue service
+function getProduct(sku) {
+    return new Promise((resolve, reject) => {
+        const url = `http://${catalogueHost}:${cataloguePort}/product/${sku}`;
+        request(url, { json: true }, (err, res, body) => {
+            if (err) {
+                reject(err);
+            } else if (res.statusCode !== 200) {
+                reject(new Error(`Failed to get product: ${res.statusCode}`));
+            } else {
+                resolve(body);
+            }
+        });
+    });
+}
+
 // Get cart with ID
 app.get('/cart/:id', (req, res) => {
     redisClient.get(req.params.id, (err, data) => {
@@ -77,11 +93,7 @@ app.delete('/cart/:id', (req, res) => {
             req.log.error('ERROR', err);
             res.status(500).send(err);
         } else {
-            if (data == 1) {
-                res.send('OK');
-            } else {
-                res.status(404).send('cart not found');
-            }
+            res.send(data === 1 ? 'OK' : 'cart not found');
         }
     });
 });
@@ -97,12 +109,12 @@ app.get('/rename/:from/:to', (req, res) => {
                 res.status(404).send('cart not found');
             } else {
                 const cart = JSON.parse(data);
-                saveCart(req.params.to, cart).then(() => {
-                    res.json(cart);
-                }).catch((err) => {
-                    req.log.error(err);
-                    res.status(500).send(err);
-                });
+                saveCart(req.params.to, cart)
+                    .then(() => res.json(cart))
+                    .catch((err) => {
+                        req.log.error(err);
+                        res.status(500).send(err);
+                    });
             }
         }
     });
@@ -111,66 +123,60 @@ app.get('/rename/:from/:to', (req, res) => {
 // Update/create cart
 app.get('/add/:id/:sku/:qty', (req, res) => {
     const qty = parseInt(req.params.qty);
-    if (isNaN(qty)) {
-        req.log.warn('quantity not a number');
-        res.status(400).send('quantity must be a number');
-        return;
-    } else if (qty < 1) {
-        req.log.warn('quantity less than one');
-        res.status(400).send('quantity has to be greater than zero');
+    if (isNaN(qty) || qty < 1) {
+        req.log.warn('Invalid quantity');
+        res.status(400).send('quantity must be a positive number');
         return;
     }
 
-    getProduct(req.params.sku).then((product) => {
-        req.log.info('got product', product);
-        if (!product) {
-            res.status(404).send('product not found');
-            return;
-        }
-        if (product.instock === 0) {
-            res.status(404).send('out of stock');
-            return;
-        }
-        redisClient.get(req.params.id, (err, data) => {
-            if (err) {
-                req.log.error('ERROR', err);
-                res.status(500).send(err);
-            } else {
-                let cart;
-                if (data == null) {
-                    cart = {
-                        total: 0,
-                        items: []
-                    };
-                } else {
-                    cart = JSON.parse(data);
-                }
-
-                // Update cart logic here...
-
-                // Save the updated cart
-                redisClient.set(req.params.id, JSON.stringify(cart), (err) => {
-                    if (err) {
-                        req.log.error('ERROR saving cart', err);
-                        res.status(500).send(err);
-                    } else {
-                        counter.inc(qty); // Increment the counter for added items
-                        res.send(cart);
-                    }
-                });
+    getProduct(req.params.sku)
+        .then((product) => {
+            req.log.info('got product', product);
+            if (!product || product.instock === 0) {
+                res.status(404).send(product ? 'out of stock' : 'product not found');
+                return;
             }
+
+            redisClient.get(req.params.id, (err, data) => {
+                if (err) {
+                    req.log.error('ERROR', err);
+                    res.status(500).send(err);
+                } else {
+                    let cart = data ? JSON.parse(data) : { total: 0, items: [] };
+
+                    // Add item to cart
+                    const existingItem = cart.items.find((item) => item.sku === product.sku);
+                    if (existingItem) {
+                        existingItem.qty += qty;
+                    } else {
+                        cart.items.push({ sku: product.sku, qty });
+                    }
+
+                    // Update cart total
+                    cart.total += product.price * qty;
+
+                    // Save updated cart
+                    redisClient.set(req.params.id, JSON.stringify(cart), (err) => {
+                        if (err) {
+                            req.log.error('ERROR saving cart', err);
+                            res.status(500).send(err);
+                        } else {
+                            counter.inc(qty); // Increment the counter for added items
+                            res.send(cart);
+                        }
+                    });
+                }
+            });
+        })
+        .catch((err) => {
+            req.log.error(err);
+            res.status(500).send(err);
         });
-    }).catch((err) => {
-        req.log.error(err);
-        res.status(500).send(err);
-    });
 });
 
 // Initialize Redis client and connect
 function initRedis() {
-    redisClient = redis.createClient({
-        url: `redis://${redisHost}`
-    });
+    redisClient = redis.createClient({ url: `redis://${redisHost}` });
 
     redisClient.on('connect', () => {
         logger.info('Connected to Redis');

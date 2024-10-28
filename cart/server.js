@@ -90,6 +90,10 @@ app.get('/metrics', (req, res) => {
 
 // get cart with id
 app.get('/cart/:id', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+    
     redisClient.get(req.params.id, (err, data) => {
         if (err) {
             req.log.error('ERROR', err);
@@ -107,6 +111,10 @@ app.get('/cart/:id', (req, res) => {
 
 // delete cart with id
 app.delete('/cart/:id', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+
     redisClient.del(req.params.id, (err, data) => {
         if (err) {
             req.log.error('ERROR', err);
@@ -123,6 +131,10 @@ app.delete('/cart/:id', (req, res) => {
 
 // rename cart i.e. at login
 app.get('/rename/:from/:to', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+
     redisClient.get(req.params.from, (err, data) => {
         if (err) {
             req.log.error('ERROR', err);
@@ -145,6 +157,10 @@ app.get('/rename/:from/:to', (req, res) => {
 
 // update/create cart
 app.get('/add/:id/:sku/:qty', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+
     // check quantity
     var qty = parseInt(req.params.qty);
     if (isNaN(qty)) {
@@ -219,6 +235,10 @@ app.get('/add/:id/:sku/:qty', (req, res) => {
 
 // update quantity - remove item when qty == 0
 app.get('/update/:id/:sku/:qty', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+
     // check quantity
     var qty = parseInt(req.params.qty);
     if (isNaN(qty)) {
@@ -275,122 +295,123 @@ app.get('/update/:id/:sku/:qty', (req, res) => {
 
 // add shipping
 app.post('/shipping/:id', (req, res) => {
+    if (!redisConnected) {
+        return res.status(500).send('Redis is not connected');
+    }
+
     var shipping = req.body;
     if (shipping.distance === undefined || shipping.cost === undefined || shipping.location == undefined) {
         req.log.warn('shipping data missing', shipping);
-        res.status(400).send('shipping data missing');
-    } else {
-        // get the cart
-        redisClient.get(req.params.id, (err, data) => {
-            if (err) {
-                req.log.error('ERROR', err);
-                res.status(500).send(err);
-            } else {
-                if (data == null) {
-                    req.log.info('no cart for', req.params.id);
-                    res.status(404).send('cart not found');
-                } else {
-                    var cart = JSON.parse(data);
-                    var item = {
-                        qty: 1,
-                        sku: 'SHIP',
-                        name: 'shipping to ' + shipping.location,
-                        price: shipping.cost,
-                        subtotal: shipping.cost
-                    };
-                    // check shipping already in the cart
-                    var idx;
-                    var len = cart.items.length;
-                    for (idx = 0; idx < len; idx++) {
-                        if (cart.items[idx].sku == item.sku) {
-                            break;
-                        }
-                    }
-                    if (idx == len) {
-                        // not in list
-                        cart.items.push(item);
-                    } else {
-                        // already in cart
-                        cart.items[idx].subtotal = item.price;
-                    }
-                    cart.total = calcTotal(cart.items);
-                    // work out tax
-                    cart.tax = calcTax(cart.total);
-                    saveCart(req.params.id, cart).then((data) => {
-                        res.json(cart);
-                    }).catch((err) => {
-                        req.log.error(err);
-                        res.status(500).send(err);
-                    });
-                }
-            }
-        });
+        res.status(400).send('missing shipping data');
+        return;
     }
+    redisClient.get(req.params.id, (err, data) => {
+        if (err) {
+            req.log.error('ERROR', err);
+            res.status(500).send(err);
+        } else {
+            if (data == null) {
+                res.status(404).send('cart not found');
+            } else {
+                var cart = JSON.parse(data);
+                if (cart.shipping === undefined) {
+                    cart.shipping = shipping;
+                } else {
+                    cart.shipping.cost += shipping.cost;
+                    cart.shipping.distance += shipping.distance;
+                }
+                cart.total += cart.shipping.cost;
+                // save the new cart
+                saveCart(req.params.id, cart).then((data) => {
+                    res.json(cart);
+                }).catch((err) => {
+                    req.log.error(err);
+                    res.status(500).send(err);
+                });
+            }
+        }
+    });
 });
 
-// Save cart to Redis
+// function to save the cart to Redis
 const saveCart = (id, cart) => {
     return new Promise((resolve, reject) => {
-        redisClient.set(id, JSON.stringify(cart), (err) => {
+        redisClient.set(id, JSON.stringify(cart), (err, data) => {
             if (err) {
                 reject(err);
             } else {
-                resolve('OK');
+                resolve(data);
             }
         });
     });
 };
 
-// Merge lists function
-const mergeList = (list, item, qty) => {
-    for (let i = 0; i < list.length; i++) {
-        if (list[i].sku === item.sku) {
-            list[i].qty += qty;
-            list[i].subtotal = list[i].qty * list[i].price;
-            return list;
+// function to merge item list
+const mergeList = (items, item, qty) => {
+    var found = false;
+    var idx;
+    for (idx = 0; idx < items.length; idx++) {
+        if (items[idx].sku == item.sku) {
+            items[idx].qty += qty;
+            found = true;
+            break;
         }
     }
-    list.push(item);
-    return list;
+    if (!found) {
+        items.push(item);
+    }
+    return items;
 };
 
-// Calculate total
+// function to calculate total
 const calcTotal = (items) => {
-    let total = 0;
-    items.forEach(item => {
-        total += item.subtotal;
-    });
-    return total;
+    return items.reduce((total, item) => total + item.subtotal, 0);
 };
 
-// Calculate tax
+// function to calculate tax
 const calcTax = (total) => {
     return total * 0.1; // 10% tax
 };
 
-// Get product details (dummy implementation)
+// function to get product details
 const getProduct = (sku) => {
     return new Promise((resolve, reject) => {
-        // Replace with actual API call to retrieve product details
-        const product = { sku: sku, name: 'Product ' + sku, price: 10, instock: 5 }; // Dummy product
-        resolve(product);
+        request({
+            url: `http://${catalogueHost}:${cataloguePort}/product/${sku}`,
+            method: 'GET'
+        }, (err, response, body) => {
+            if (err) {
+                reject(err);
+            } else {
+                const product = JSON.parse(body);
+                resolve(product);
+            }
+        });
     });
 };
 
-// Start Redis client
+// Start the Redis client and handle connection events
 const redisClient = redis.createClient({
     url: `redis://${redisHost}:6379`
 });
+
 redisClient.on('connect', () => {
     redisConnected = true;
     console.log("Connected to Redis.");
 });
+
 redisClient.on('error', (err) => {
     console.error('Redis Client Error', err);
+    redisConnected = false;  // Update this flag on error
 });
 
-// Start Express server
+// Connect to Redis
+redisClient.connect().catch((err) => {
+    console.error('Failed to connect to Redis:', err);
+});
+
+// Start the server
 const port = process.env.PORT || 8080;
 app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    console.log(`App listening on port ${port}`);
 });

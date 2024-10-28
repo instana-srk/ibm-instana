@@ -1,25 +1,33 @@
-# Use a Node.js base image
-FROM node:16
+# Base image
+FROM node:20-alpine
 
-# Set the working directory
+# Install bash if needed
+RUN apk add --no-cache bash
+
+# Create directory and user
+RUN mkdir -p /opt/server && \
+    adduser -D -h /opt/server roboshop && \
+    chown roboshop:roboshop -R /opt/server
+
+# Set working directory
 WORKDIR /opt/server
 
-# Copy package.json and server.js to the container
-COPY package.json .
-COPY server.js .
-
-# Install dependencies as root user
+# Copy package files and install dependencies
+COPY package.json  ./
 RUN npm install --omit=dev
 
-# Add a non-root user and switch to it
-RUN useradd -m roboshop
+# Copy application files
+COPY server.js .
+
+# Grant roboshop user permission to write to Instana modules if necessary
+RUN chown -R roboshop:roboshop /opt/server/node_modules && \
+    chmod -R 775 /opt/server/node_modules/@instana
+
+# Switch to non-root user
 USER roboshop
 
-# Copy the application files to the non-root user's directory
-COPY --chown=roboshop:roboshop . .
-
-# Expose the port the app runs on
+# Expose port
 EXPOSE 8080
 
-# Start the application
+# Start application
 CMD ["node", "server.js"]

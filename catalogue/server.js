@@ -1,6 +1,5 @@
 const instana = require('@instana/collector');
-// init tracing
-// MUST be done before loading anything else!
+// Initialize Instana tracing
 instana({
     tracing: {
         enabled: true
@@ -30,7 +29,6 @@ let mongoConnected = false;
 const app = express();
 
 app.use(expLogger);
-
 app.use((req, res, next) => {
     res.set('Timing-Allow-Origin', '*');
     res.set('Access-Control-Allow-Origin', '*');
@@ -55,7 +53,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
 app.get('/health', (req, res) => {
-    var stat = {
+    const stat = {
         app: 'OK',
         mongo: mongoConnected
     };
@@ -65,96 +63,76 @@ app.get('/health', (req, res) => {
 // all products
 app.get('/products', (req, res) => {
     if (mongoConnected) {
-        collection.find({}).toArray().then((products) => {
-            res.json(products);
-        }).catch((e) => {
-            req.log.error('ERROR', e);
-            res.status(500).send(e);
-        });
+        collection.find({}).toArray()
+            .then(products => res.json(products))
+            .catch(error => handleError(error, req, res));
     } else {
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+        sendDbError(req, res);
     }
 });
 
 // product by SKU
 app.get('/product/:sku', (req, res) => {
     if (mongoConnected) {
-        // optionally slow this down
         const delay = process.env.GO_SLOW || 0;
         setTimeout(() => {
-            collection.findOne({ sku: req.params.sku }).then((product) => {
-                req.log.info('product', product);
-                if (product) {
-                    res.json(product);
-                } else {
-                    res.status(404).send('SKU not found');
-                }
-            }).catch((e) => {
-                req.log.error('ERROR', e);
-                res.status(500).send(e);
-            });
+            collection.findOne({ sku: req.params.sku })
+                .then(product => product ? res.json(product) : res.status(404).send('SKU not found'))
+                .catch(error => handleError(error, req, res));
         }, delay);
     } else {
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+        sendDbError(req, res);
     }
 });
 
 // products in a category
 app.get('/products/:cat', (req, res) => {
     if (mongoConnected) {
-        collection.find({ categories: req.params.cat }).sort({ name: 1 }).toArray().then((products) => {
-            if (products) {
-                res.json(products);
-            } else {
-                res.status(404).send('No products for ' + req.params.cat);
-            }
-        }).catch((e) => {
-            req.log.error('ERROR', e);
-            res.status(500).send(e);
-        });
+        collection.find({ categories: req.params.cat }).sort({ name: 1 }).toArray()
+            .then(products => res.json(products.length ? products : 'No products for ' + req.params.cat))
+            .catch(error => handleError(error, req, res));
     } else {
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+        sendDbError(req, res);
     }
 });
 
 // all categories
 app.get('/categories', (req, res) => {
     if (mongoConnected) {
-        collection.distinct('categories').then((categories) => {
-            res.json(categories);
-        }).catch((e) => {
-            req.log.error('ERROR', e);
-            res.status(500).send(e);
-        });
+        collection.distinct('categories')
+            .then(categories => res.json(categories))
+            .catch(error => handleError(error, req, res));
     } else {
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+        sendDbError(req, res);
     }
 });
 
 // search name and description
 app.get('/search/:text', (req, res) => {
     if (mongoConnected) {
-        collection.find({ '$text': { '$search': req.params.text } }).toArray().then((hits) => {
-            res.json(hits);
-        }).catch((e) => {
-            req.log.error('ERROR', e);
-            res.status(500).send(e);
-        });
+        collection.find({ '$text': { '$search': req.params.text } }).toArray()
+            .then(hits => res.json(hits))
+            .catch(error => handleError(error, req, res));
     } else {
-        req.log.error('database not available');
-        res.status(500).send('database not available');
+        sendDbError(req, res);
     }
 });
+
+function handleError(error, req, res) {
+    req.log.error('ERROR', error);
+    res.status(500).send(error);
+}
+
+function sendDbError(req, res) {
+    req.log.error('Database not available');
+    res.status(500).send('Database not available');
+}
 
 // set up Mongo
 async function mongoConnect() {
     try {
         const mongoURL = process.env.MONGO_URL || 'mongodb://mongodb:27017/catalogue';
-        const client = await MongoClient.connect(mongoURL, { useNewUrlParser: true, useUnifiedTopology: true });
+        const client = await MongoClient.connect(mongoURL); // Removed deprecated options
         db = client.db('catalogue');
         collection = db.collection('products');
         mongoConnected = true;
@@ -168,15 +146,15 @@ async function mongoConnect() {
 
 // mongodb connection retry loop
 function mongoLoop() {
-    mongoConnect().catch((e) => {
-        logger.error('ERROR', e);
+    mongoConnect().catch(error => {
+        logger.error('ERROR', error);
         setTimeout(mongoLoop, 2000);
     });
 }
 
 mongoLoop();
 
-// fire it up!
+// start server
 const port = process.env.CATALOGUE_SERVER_PORT || '8080';
 app.listen(port, () => {
     logger.info('Started on port', port);

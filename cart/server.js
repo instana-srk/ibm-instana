@@ -11,6 +11,7 @@ if (instanaAvailable) {
 }
 
 const redis = require('redis');
+const { createClient } = require('redis'); // Add this line
 const request = require('request');
 const bodyParser = require('body-parser');
 const express = require('express');
@@ -288,16 +289,17 @@ app.post('/shipping/:id', (req, res) => {
                     var cart = JSON.parse(data);
                     var item = {
                         qty: 1,
-                        sku: 'SHIP',
-                        name: 'shipping to ' + shipping.location,
+                        sku: 'shipping',
+                        name: shipping.location,
                         price: shipping.cost,
                         subtotal: shipping.cost
                     };
-                    // check shipping already in the cart
                     var idx;
                     var len = cart.items.length;
                     for(idx = 0; idx < len; idx++) {
                         if(cart.items[idx].sku == item.sku) {
+                            // shipping is already in the cart, update subtotal
+                            cart.items[idx].subtotal = shipping.cost;
                             break;
                         }
                     }

@@ -316,16 +316,29 @@ app.post('/shipping/:id', (req, res) => {
     });
 });
 
-// Merge list helper
-function mergeList(list, item, qty) {
-    var idx = list.findIndex(existingItem => existingItem.sku === item.sku);
-    if (idx !== -1) {
-        list[idx].qty += qty;
-        list[idx].subtotal = list[idx].qty * list[idx].price;
-    } else {
-        list.push(item);
-    }
-    return list;
+// Save cart
+function saveCart(id, cart) {
+    return new Promise((resolve, reject) => {
+        redisClient.set(id, JSON.stringify(cart), (err, res) => {
+            if (err) {
+                return reject(err);
+            }
+            resolve(res);
+        });
+    });
+}
+
+// Get product from catalogue
+function getProduct(sku) {
+    return new Promise((resolve, reject) => {
+        request(`http://${catalogueHost}:${cataloguePort}/product/${sku}`, (error, response, body) => {
+            if (!error && response.statusCode == 200) {
+                resolve(JSON.parse(body));
+            } else {
+                resolve(null);
+            }
+        });
+    });
 }
 
 // Calculate total
@@ -335,50 +348,32 @@ function calcTotal(items) {
 
 // Calculate tax
 function calcTax(total) {
-    return total * 0.1; // Example tax calculation (10%)
+    return total * 0.1; // 10% tax
 }
 
-// Get product from catalogue
-function getProduct(sku) {
-    return new Promise((resolve, reject) => {
-        request.get(`http://${catalogueHost}:${cataloguePort}/catalogue/${sku}`, (err, response, body) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(JSON.parse(body));
-            }
-        });
-    });
+// Merge list
+function mergeList(cartItems, newItem, qty) {
+    let itemIndex = cartItems.findIndex(item => item.sku === newItem.sku);
+    if (itemIndex > -1) {
+        cartItems[itemIndex].qty += qty;
+        cartItems[itemIndex].subtotal += newItem.subtotal;
+    } else {
+        cartItems.push(newItem);
+    }
+    return cartItems;
 }
 
-// Save cart to Redis
-function saveCart(id, cart) {
-    return new Promise((resolve, reject) => {
-        redisClient.set(id, JSON.stringify(cart), (err) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        });
-    });
-}
-
-// Connect to Redis
-const redisClient = redis.createClient({
-    host: redisHost,
-    port: 6379
+const redisClient = redis.createClient({ host: redisHost });
+redisClient.on('connect', () => {
+    redisConnected = true;
+    console.log('Redis connected');
 });
 redisClient.on('error', (err) => {
-    console.error('Redis error:', err);
-});
-redisClient.on('connect', () => {
-    console.log('Connected to Redis');
-    redisConnected = true;
+    redisConnected = false;
+    console.log('Redis error:', err);
 });
 
-// Start server
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
 });

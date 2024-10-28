@@ -1,5 +1,7 @@
 # Base image
 FROM node:20-alpine
+
+# Install bash if needed
 RUN apk add --no-cache bash
 
 # Create directory and user
@@ -10,20 +12,19 @@ RUN mkdir -p /opt/server && \
 # Set working directory
 WORKDIR /opt/server
 
-# Copy application files
-COPY package.json .
-COPY server.js .
-
-# Install dependencies
+# Copy package files and install dependencies
+COPY package.json package-lock.json ./
 RUN npm install --omit=dev
 
-# Grant roboshop user permission to write to Instana modules in node_modules
+# Copy application files
+COPY server.js .
+
+# Grant roboshop user permission to write to Instana modules if necessary
 RUN chown -R roboshop:roboshop /opt/server/node_modules && \
     chmod -R 775 /opt/server/node_modules/@instana
 
 # Switch to non-root user
 USER roboshop
-
 
 # Expose port
 EXPOSE 8080

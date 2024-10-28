@@ -44,15 +44,19 @@ app.use((req, res, next) => {
 
 // Custom annotation for Instana
 app.use((req, res, next) => {
-    let dcs = [
-        "asia-northeast2",
-        "asia-south1",
-        "europe-west3",
-        "us-east1",
-        "us-west1"
-    ];
-    let span = instana.currentSpan();
-    span.annotate('custom.sdk.tags.datacenter', dcs[Math.floor(Math.random() * dcs.length)]);
+    if (instana) { // Check if instana is initialized
+        let dcs = [
+            "asia-northeast2",
+            "asia-south1",
+            "europe-west3",
+            "us-east1",
+            "us-west1"
+        ];
+        let span = instana.currentSpan();
+        if (span) { // Ensure span is defined
+            span.annotate('custom.sdk.tags.datacenter', dcs[Math.floor(Math.random() * dcs.length)]);
+        }
+    }
     next();
 });
 

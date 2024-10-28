@@ -255,7 +255,7 @@ redisClient.connect();
 async function mongoConnect() {
     try {
         const mongoURL = process.env.MONGO_URL || 'mongodb://localhost:27017/users';
-        const client = await MongoClient.connect(mongoURL, { useNewUrlParser: true, useUnifiedTopology: true });
+        const client = await MongoClient.connect(mongoURL); // Removed deprecated options
         db = client.db('users');
         usersCollection = db.collection('users');
         ordersCollection = db.collection('orders');
@@ -270,7 +270,7 @@ async function mongoConnect() {
 mongoConnect();
 
 // Start the server
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
 app.listen(port, () => {
     logger.info(`Server is running on port ${port}`);
 });

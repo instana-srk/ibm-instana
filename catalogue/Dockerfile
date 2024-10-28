@@ -13,7 +13,7 @@ RUN mkdir -p /opt/server && \
 WORKDIR /opt/server
 
 # Copy package files and install dependencies
-COPY package.json package-lock.json ./
+COPY package.json  ./
 RUN npm install --omit=dev
 
 # Copy application files

@@ -1,11 +1,14 @@
-const instana = require('@instana/collector');
-// init tracing
-// MUST be done before loading anything else!
-instana({
-    tracing: {
-        enabled: true
-    }
-});
+const instanaAvailable = process.env.INSTANA_AGENT_AVAILABLE === 'true';
+let instana;
+if (instanaAvailable) {
+    instana = require('@instana/collector')({
+        agentHost: process.env.INSTANA_AGENT_HOST || 'localhost',
+        tracing: { enabled: true }
+    });
+    console.log("Instana initialized.");
+} else {
+    console.log("Instana not initialized as agent is unavailable.");
+}
 
 const redis = require('redis');
 const axios = require('axios'); // Use axios instead of request

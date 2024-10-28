@@ -237,13 +237,14 @@ app.get('/history/:id', async (req, res) => {
 });
 
 // Connect to Redis
+const redisHost = process.env.REDIS_HOST || 'localhost'; // Use REDIS_HOST if defined
 const redisClient = createClient({
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
+    url: `redis://${redisHost}:6379` // Use the resolved redisHost here
 });
 
 redisClient.on('error', (e) => {
     logger.error('Redis ERROR', e);
-    logger.error(`Attempted Redis connection to: ${process.env.REDIS_URL || 'redis://localhost:6379'}`);
+    logger.error(`Attempted Redis connection to: ${`redis://${redisHost}:6379`}`);
 });
 redisClient.on('connect', () => {
     logger.info('Redis connected');
@@ -260,34 +261,16 @@ async function mongoConnect() {
         ordersCollection = db.collection('orders');
         mongoConnected = true;
         logger.info('MongoDB connected');
-    } catch (error) {
+    } catch (e) {
+        logger.error('MongoDB connection ERROR', e);
         mongoConnected = false;
-        logger.error('ERROR', error);
-        setTimeout(mongoLoop, 2000);
     }
 }
 
-function mongoLoop() {
-    mongoConnect().catch((e) => {
-        logger.error('ERROR', e);
-        setTimeout(mongoLoop, 2000);
-    });
-}
-
-// Start MongoDB connection loop
-mongoLoop();
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    await redisClient.quit();
-    if (db) {
-        await db.close(); // Assuming you keep a reference to the MongoDB client
-    }
-    process.exit(0);
-});
+mongoConnect();
 
 // Start the server
-const port = process.env.USER_SERVER_PORT || '8080';
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    logger.info('Started on port', port);
+    logger.info(`Server is running on port ${port}`);
 });

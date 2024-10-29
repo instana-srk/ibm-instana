@@ -11,7 +11,6 @@ if (instanaAvailable) {
 }
 
 const redis = require('redis');
-const { createClient } = require('redis'); // Add this line
 const request = require('request');
 const bodyParser = require('body-parser');
 const express = require('express');
@@ -27,12 +26,13 @@ const counter = new promClient.Counter({
     registers: [register]
 });
 
+
 var redisConnected = false;
 
-// Only one declaration of redisHost
-var redisHost = process.env.REDIS_HOST || 'redis';
-var catalogueHost = process.env.CATALOGUE_HOST || 'catalogue';
-var cataloguePort = process.env.CATALOGUE_PORT || '8080';
+var redisHost = process.env.REDIS_HOST || 'redis'
+var catalogueHost = process.env.CATALOGUE_HOST || 'catalogue'
+var cataloguePort = process.env.CATALOGUE_PORT || '8080'
+
 
 const logger = pino({
     level: 'info',
@@ -53,20 +53,6 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use((req, res, next) => {
-    let dcs = [
-        "asia-northeast2",
-        "asia-south1",
-        "europe-west3",
-        "us-east1",
-        "us-west1"
-    ];
-    let span = instana.currentSpan();
-    span.annotate('custom.sdk.tags.datacenter', dcs[Math.floor(Math.random() * dcs.length)]);
-
-    next();
-});
-
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
@@ -83,6 +69,7 @@ app.get('/metrics', (req, res) => {
     res.header('Content-Type', 'text/plain');
     res.send(register.metrics());
 });
+
 
 // get cart with id
 app.get('/cart/:id', (req, res) => {
@@ -218,7 +205,7 @@ app.get('/update/:id/:sku/:qty', (req, res) => {
     // check quantity
     var qty = parseInt(req.params.qty);
     if(isNaN(qty)) {
-        req.log.warn('quantity not a number');
+        req.log.warn('quanity not a number');
         res.status(400).send('quantity must be a number');
         return;
     } else if(qty < 0) {
@@ -289,30 +276,30 @@ app.post('/shipping/:id', (req, res) => {
                     var cart = JSON.parse(data);
                     var item = {
                         qty: 1,
-                        sku: 'shipping',
-                        name: shipping.location,
+                        sku: 'SHIP',
+                        name: 'shipping to ' + shipping.location,
                         price: shipping.cost,
                         subtotal: shipping.cost
                     };
+                    // check shipping already in the cart
                     var idx;
                     var len = cart.items.length;
                     for(idx = 0; idx < len; idx++) {
                         if(cart.items[idx].sku == item.sku) {
-                            // shipping is already in the cart, update subtotal
-                            cart.items[idx].subtotal = shipping.cost;
                             break;
                         }
                     }
                     if(idx == len) {
-                        // not in list, add it
+                        // not already in cart
                         cart.items.push(item);
                     } else {
-                        // already in list, update subtotal
-                        cart.items[idx].subtotal = shipping.cost;
+                        cart.items[idx] = item;
                     }
                     cart.total = calcTotal(cart.items);
                     // work out tax
                     cart.tax = calcTax(cart.total);
+
+                    // save the updated cart
                     saveCart(req.params.id, cart).then((data) => {
                         res.json(cart);
                     }).catch((err) => {
@@ -325,81 +312,82 @@ app.post('/shipping/:id', (req, res) => {
     }
 });
 
-// Function to get product details
-const getProduct = (sku) => {
-    return new Promise((resolve, reject) => {
-        request({
-            url: `http://${catalogueHost}:${cataloguePort}/catalogue/${sku}`,
-            method: 'GET',
-            json: true
-        }, (err, response, body) => {
-            if(err) {
-                reject(err);
-            } else {
-                if(response.statusCode === 200) {
-                    resolve(body);
-                } else {
-                    resolve(null);
-                }
-            }
-        });
-    });
-};
-
-// Function to save cart to Redis
-const saveCart = (id, cart) => {
-    return new Promise((resolve, reject) => {
-        redisClient.set(id, JSON.stringify(cart), (err) => {
-            if(err) {
-                reject(err);
-            } else {
-                resolve(cart);
-            }
-        });
-    });
-};
-
-// Function to merge item in cart
-const mergeList = (list, item, qty) => {
+function mergeList(list, product, qty) {
+    var inlist = false;
+    // loop through looking for sku
     var idx;
     var len = list.length;
     for(idx = 0; idx < len; idx++) {
-        if(list[idx].sku == item.sku) {
-            list[idx].qty += qty;
-            list[idx].subtotal += item.subtotal;
-            return list;
+        if(list[idx].sku == product.sku) {
+            inlist = true;
+            break;
         }
     }
-    list.push(item);
+
+    if(inlist) {
+        list[idx].qty += qty;
+        list[idx].subtotal = list[idx].price * list[idx].qty;
+    } else {
+        list.push(product);
+    }
+
     return list;
-};
+}
 
-// Function to calculate total
-const calcTotal = (items) => {
-    return items.reduce((total, item) => {
-        return total + item.subtotal;
-    }, 0);
-};
+function calcTotal(list) {
+    var total = 0;
+    for(var idx = 0, len = list.length; idx < len; idx++) {
+        total += list[idx].subtotal;
+    }
 
-// Function to calculate tax
-const calcTax = (total) => {
-    return total * 0.2; // Assuming a fixed tax rate of 20%
-};
+    return total;
+}
 
-// Connect to Redis
-const redisClient = createClient({
-    url: `redis://${redisHost}:6379` // Use the resolved redisHost here
+function calcTax(total) {
+    // tax @ 20%
+    return (total - (total / 1.2));
+}
+
+function getProduct(sku) {
+    return new Promise((resolve, reject) => {
+        request('http://' + catalogueHost + ':' + cataloguePort +'/product/' + sku, (err, res, body) => {
+            if(err) {
+                reject(err);
+            } else if(res.statusCode != 200) {
+                resolve(null);
+            } else {
+                // return object - body is a string
+                // TODO - catch parse error
+                resolve(JSON.parse(body));
+            }
+        });
+    });
+}
+
+function saveCart(id, cart) {
+    logger.info('saving cart', cart);
+    return new Promise((resolve, reject) => {
+        redisClient.setex(id, 3600, JSON.stringify(cart), (err, data) => {
+            if(err) {
+                reject(err);
+            } else {
+                resolve(data);
+            }
+        });
+    });
+}
+
+redisClient.on('error', (e) => {
+    logger.error('Redis ERROR', e);
+    logger.error(`Attempted Redis connection to: ${`redis://${redisHost}:6379`}`);
 });
-
-redisClient.on('error', (err) => {
-    console.error('Redis error', err);
-});
-
 redisClient.on('connect', () => {
-    console.log('Redis client connected');
-    redisConnected = true;
+    logger.info('Redis connected');
 });
+redisClient.connect();
 
-app.listen(8080, () => {
-    console.log('Server started on port 8080');
+// fire it up!
+const port = process.env.CART_SERVER_PORT || '8080';
+app.listen(port, () => {
+    logger.info('Started on port', port);
 });

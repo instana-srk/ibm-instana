@@ -9,14 +9,14 @@
   "author": "SteveW",
   "license": "Apache-2.0",
   "dependencies": {
-      "body-parser": "^1.20.2",
-      "express": "^4.17.1",
-      "redis": "^4.7.0",
+      "body-parser": "^1.20.3",
+      "express": "^4.15.4",
+      "redis": "^2.8.0",
       "request": "^2.88.2",
       "pino": "^5.10.8",
       "express-pino-logger": "^4.0.0",
       "pino-pretty": "^2.5.0",
-      "@instana/collector": "^3.21.0",
+      "@instana/collector": "^4.0.0",
       "prom-client": "^11.5.3"
   }
 }

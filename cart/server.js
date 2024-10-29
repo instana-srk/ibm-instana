@@ -26,6 +26,10 @@ const counter = new promClient.Counter({
     registers: [register]
 });
 
+const redisClient = redis.createClient({
+    url: `redis://${redisHost}:6379`
+});
+
 
 var redisConnected = false;
 
